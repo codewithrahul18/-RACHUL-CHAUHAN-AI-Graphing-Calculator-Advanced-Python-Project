@@ -1,0 +1,191 @@
+# ============================================================
+# 💡 RAHUL CHAUHAN AI GRAPHING CALCULATOR
+# Advanced Interactive Math Tool with AI + SymPy
+# ============================================================
+
+# If needed in Colab:
+# !pip install sympy numpy matplotlib ipywidgets pandas openai
+
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from sympy import symbols, sympify, lambdify, solveset, S, Eq
+from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
+from ipywidgets import VBox, HBox, Text, IntSlider, Button, Output, Checkbox, HTML
+from IPython.display import display, clear_output
+
+# Optional: enable AI natural language → math expression
+USE_OPENAI = False    # set True and add your API key below if you want AI features
+if USE_OPENAI:
+    import openai, os
+    openai.api_key = os.getenv("OPENAI_API_KEY", "YOUR_API_KEY_HERE")
+
+# Title banner
+title_html = HTML(
+    value=f"""
+    <div style="text-align:center;
+                font-size:24px;
+                font-weight:bold;
+                color:#4B0082;
+                margin-bottom:10px;">
+        🌟 RAHUL CHAUHAN AI GRAPHING CALCULATOR 🌟
+    </div>
+    <hr>
+    """,
+)
+display(title_html)
+
+# ------------- Safe parser -------------
+transformations = (standard_transformations + (implicit_multiplication_application,))
+
+def safe_parse(expr_str):
+    try:
+        return parse_expr(expr_str, transformations=transformations)
+    except Exception as e:
+        raise ValueError(f"Cannot parse expression: {expr_str}\n{e}")
+
+# ------------- Optional AI conversion -------------
+def nl_to_expression(nl_text):
+    if not USE_OPENAI:
+        raise RuntimeError("OpenAI not enabled. Set USE_OPENAI=True and API key.")
+    prompt = f"Convert this into valid SymPy math expressions separated by commas. Example: 'plot x squared minus 3x' -> 'x**2 - 3*x'. Input: {nl_text}"
+    resp = openai.Completion.create(model="gpt-4o-mini", prompt=prompt, max_tokens=100)
+    return resp.choices[0].text.strip()
+
+def create_callable(expr):
+    x = symbols('x')
+    return lambdify(x, expr, modules=["numpy"])
+
+def find_intersections(expr1, expr2, xmin=-10, xmax=10, samples=1000):
+    x = np.linspace(xmin, xmax, samples)
+    f1 = create_callable(expr1); f2 = create_callable(expr2)
+    ydiff = f1(x) - f2(x)
+    roots = []
+    for i in range(len(x)-1):
+        if np.isnan(ydiff[i]) or np.isnan(ydiff[i+1]): continue
+        if ydiff[i]*ydiff[i+1] < 0:
+            a,b = x[i],x[i+1]
+            for _ in range(40):
+                m = (a+b)/2
+                if (f1(a)-f2(a))*(f1(m)-f2(m)) <= 0: b = m
+                else: a = m
+            roots.append(round((a+b)/2,6))
+    return sorted(list(set(roots)))
+
+# ------------- UI setup -------------
+expr_input = Text(value="x**2 - 4", description="Function(s):")
+zoom_slider = IntSlider(value=10, min=1, max=100, step=1, description="Zoom")
+points_slider = IntSlider(value=400, min=100, max=2000, step=100, description="Points")
+ai_checkbox = Checkbox(False, description="Use AI (NL → Math)")
+plot_button = Button(description="Plot", button_style="success")
+table_button = Button(description="Show Table", button_style="info")
+solve_button = Button(description="Solve", button_style="warning")
+export_button = Button(description="Save PNG", button_style="primary")
+out = Output()
+
+# ------------- Core functions -------------
+def parse_input(text, use_ai=False):
+    if use_ai: text = nl_to_expression(text)
+    parts = [p.strip() for p in text.replace("\n", ",").split(",") if p.strip()]
+    return [safe_parse(p) for p in parts]
+
+def on_plot_clicked(b):
+    with out:
+        clear_output(wait=True)
+        print("🔹 RACHUL CHAUHAN GRAPHING OUTPUT 🔹\n")
+        try:
+            exprs = parse_input(expr_input.value, ai_checkbox.value)
+        except Exception as e:
+            print("Parse error:", e)
+            return
+        xvals = np.linspace(-zoom_slider.value, zoom_slider.value, points_slider.value)
+        fig, ax = plt.subplots(figsize=(8,6))
+        ax.axhline(0, color='black', lw=1)
+        ax.axvline(0, color='black', lw=1)
+        for expr in exprs:
+            f = create_callable(expr)
+            ax.plot(xvals, f(xvals), label=str(expr))
+        # intersections if 2 or more
+        if len(exprs) > 1:
+            for i in range(len(exprs)):
+                for j in range(i+1, len(exprs)):
+                    pts = find_intersections(exprs[i], exprs[j],
+                                             xmin=-zoom_slider.value, xmax=zoom_slider.value)
+                    for r in pts:
+                        y = create_callable(exprs[i])(r)
+                        ax.plot(r, y, 'ro')
+                        print(f"Intersection of {exprs[i]} & {exprs[j]} at (x={r}, y={round(y,4)})")
+        ax.legend(); ax.grid(True)
+        plt.title("RAHUL CHAUHAN AI Graphing Calculator")
+        plt.show()
+
+def on_table_clicked(b):
+    with out:
+        clear_output(wait=True)
+        try:
+            exprs = parse_input(expr_input.value, ai_checkbox.value)
+        except Exception as e:
+            print("Parse error:", e)
+            return
+        xvals = np.linspace(-zoom_slider.value, zoom_slider.value, 50)
+        df = pd.DataFrame({"x":xvals})
+        for expr in exprs:
+            f = create_callable(expr)
+            df[str(expr)] = f(xvals)
+        display(df.head(20))
+        df.to_csv("RAHUL_CHAUHAN_Table.csv", index=False)
+        print("✅ Table saved as RAHUL_CHAUHAN_Table.csv")
+
+def on_solve_clicked(b):
+    with out:
+        clear_output(wait=True)
+        from sympy import nonlinsolve
+        try:
+            exprs = parse_input(expr_input.value)
+        except Exception as e:
+            print("Parse error:", e)
+            return
+        syms = set().union(*[e.free_symbols for e in exprs])
+        print(f"Solving equations for symbols: {syms}")
+        if len(syms) == 1:
+            var = list(syms)[0]
+            for expr in exprs:
+                sol = solveset(Eq(expr,0), var, domain=S.Complexes)
+                print(f"{expr}=0 → {sol}")
+        else:
+            sol = nonlinsolve(exprs, list(syms))
+            print("Solutions:")
+            print(sol)
+
+def on_export_clicked(b):
+    with out:
+        clear_output(wait=True)
+        try:
+            exprs = parse_input(expr_input.value, ai_checkbox.value)
+        except Exception as e:
+            print("Parse error:", e)
+            return
+        xvals = np.linspace(-zoom_slider.value, zoom_slider.value, points_slider.value)
+        fig, ax = plt.subplots()
+        for expr in exprs:
+            f = create_callable(expr)
+            ax.plot(xvals, f(xvals), label=str(expr))
+        ax.legend(); ax.grid(True)
+        ax.set_title("RAHUL CHAUHAN AI Graphing Calculator")
+        fig.savefig("RAHUL_CHAUHAN_Graph.png", dpi=200)
+        plt.close(fig)
+        print("📁 Saved plot as RAHUL_CHAUHAN_Graph.png")
+
+# ------------- Hook buttons -------------
+plot_button.on_click(on_plot_clicked)
+table_button.on_click(on_table_clicked)
+solve_button.on_click(on_solve_clicked)
+export_button.on_click(on_export_clicked)
+
+ui = VBox([
+    HBox([expr_input, ai_checkbox]),
+    HBox([zoom_slider, points_slider]),
+    HBox([plot_button, table_button, solve_button, export_button]),
+    out
+])
+display(ui)
