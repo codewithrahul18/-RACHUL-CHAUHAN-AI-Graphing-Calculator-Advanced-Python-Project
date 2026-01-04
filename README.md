@@ -1,1 +1,1 @@
-# -RACHUL-CHAUHAN-AI-Graphing-Calculator-Advanced-Python-Project
+# AI-Graphing-Calculator-Advanced-Python-Project
